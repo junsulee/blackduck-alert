@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import javax.mail.MessagingException;
@@ -47,6 +48,7 @@ import com.blackducksoftware.integration.hub.alert.channel.email.repository.dist
 import com.blackducksoftware.integration.hub.alert.channel.email.repository.global.GlobalEmailConfigEntity;
 import com.blackducksoftware.integration.hub.alert.channel.email.repository.global.GlobalEmailRepositoryWrapper;
 import com.blackducksoftware.integration.hub.alert.channel.email.template.EmailTarget;
+import com.blackducksoftware.integration.hub.alert.channel.email.users.EmailGroupUserOptOutRepositoryWrapper;
 import com.blackducksoftware.integration.hub.alert.config.GlobalProperties;
 import com.blackducksoftware.integration.hub.alert.datasource.entity.repository.CommonDistributionRepositoryWrapper;
 import com.blackducksoftware.integration.hub.alert.digest.model.ProjectData;
@@ -66,13 +68,16 @@ public class EmailGroupChannel extends DistributionChannel<EmailGroupEvent, Glob
     private final static Logger logger = LoggerFactory.getLogger(EmailGroupChannel.class);
 
     private final GlobalProperties globalProperties;
+    private final EmailGroupUserOptOutRepositoryWrapper emailGroupUserOptOutRepositoryWrapper;
 
     @Autowired
     public EmailGroupChannel(final GlobalProperties globalProperties, final Gson gson, final AuditEntryRepositoryWrapper auditEntryRepository, final GlobalEmailRepositoryWrapper emailRepository,
-            final EmailGroupDistributionRepositoryWrapper emailGroupDistributionRepository, final CommonDistributionRepositoryWrapper commonDistributionRepository) {
+            final EmailGroupDistributionRepositoryWrapper emailGroupDistributionRepository, final CommonDistributionRepositoryWrapper commonDistributionRepository,
+            final EmailGroupUserOptOutRepositoryWrapper emailGroupUserOptOutRepositoryWrapper) {
         super(gson, auditEntryRepository, emailRepository, emailGroupDistributionRepository, commonDistributionRepository, EmailGroupEvent.class);
 
         this.globalProperties = globalProperties;
+        this.emailGroupUserOptOutRepositoryWrapper = emailGroupUserOptOutRepositoryWrapper;
     }
 
     @JmsListener(destination = SupportedChannels.EMAIL_GROUP)
@@ -88,7 +93,7 @@ public class EmailGroupChannel extends DistributionChannel<EmailGroupEvent, Glob
             final String hubGroupName = emailConfigEntity.getGroupName();
             final String subjectLine = emailConfigEntity.getEmailSubjectLine();
             final HubServicesFactory hubServicesFactory = globalProperties.createHubServicesFactory(logger);
-            final List<String> emailAddresses = getEmailAddressesForGroup(hubServicesFactory, hubGroupName);
+            final List<String> emailAddresses = getEmailAddressesForGroup(hubServicesFactory, hubGroupName, event.getCommonDistributionConfigId());
             sendMessage(emailAddresses, event, subjectLine);
         } else {
             logger.warn("No configuration found with id {}.", event.getCommonDistributionConfigId());
@@ -118,7 +123,7 @@ public class EmailGroupChannel extends DistributionChannel<EmailGroupEvent, Glob
         }
     }
 
-    private List<String> getEmailAddressesForGroup(final HubServicesFactory hubServicesFactory, final String hubGroup) throws IntegrationException {
+    private List<String> getEmailAddressesForGroup(final HubServicesFactory hubServicesFactory, final String hubGroup, final Long commonConfigId) throws IntegrationException {
         final UserGroupService groupService = hubServicesFactory.createUserGroupService();
         final UserGroupView userGroupView = groupService.getGroupByName(hubGroup);
 
@@ -129,6 +134,13 @@ public class EmailGroupChannel extends DistributionChannel<EmailGroupEvent, Glob
         logger.info(userGroupView.json);
 
         final List<UserView> users = hubServicesFactory.createHubService().getAllResponses(userGroupView, UserGroupView.USERS_LINK_RESPONSE);
+        final Set<String> optOutEmailEntities = emailGroupUserOptOutRepositoryWrapper.findByCommonDistributionConfigId(commonConfigId).stream()
+                .map(entity -> entity.getuserOptOutEmail())
+                .collect(Collectors.toSet());
+
+        users.removeIf(user -> {
+            return optOutEmailEntities.contains(user.email);
+        });
         return users.stream().map(user -> user.email).collect(Collectors.toList());
     }
 }
