@@ -16,7 +16,7 @@
     "enzyme": "^3.3.0",
     "font-awesome": "^4.7.0",
     "history": "^4.7.2",
-    "prop-types": "^15.6.1",
+    "prop-types": "^15.7.2",
     "react": "^15.6.2",
     "react-bootstrap": "^0.32.1",
     "react-bootstrap-table": "^4.3.1",
